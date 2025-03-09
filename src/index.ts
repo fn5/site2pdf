@@ -41,7 +41,8 @@ export async function generatePDF(
 	url: string,
 	urlPattern: RegExp,
 	concurrentLimit: number,
-): Promise<Buffer> {
+	options?: { separate?: boolean }
+): Promise<Buffer | Array<{ url: string, buffer: Buffer }>> {
 	const limit = pLimit(concurrentLimit);
 	const crawledUrls = new Set<string>();
 	const queue: string[] = [url];
@@ -95,8 +96,6 @@ export async function generatePDF(
 		uniqueSubLinks.unshift(url);
 	}
 
-	const pdfDoc = await PDFDocument.create();
-
 	const generatePDFForPage = async (link: string) => {
 		console.log(`Processing ${link}`);
 		const newPage = await ctx.browser.newPage();
@@ -134,7 +133,7 @@ export async function generatePDF(
 			});
 			
 			console.log(`Successfully generated PDF for ${link}`);
-			return pdfBytes;
+			return { url: link, buffer: pdfBytes };
 		} catch (error) {
 			console.warn(`Skipping ${link}: ${error instanceof Error ? error.message : error}`);
 			return null;
@@ -149,29 +148,38 @@ export async function generatePDF(
 			limit(() => generatePDFForPage(link))
 		)
 	);
-	// Filter out failed results and extract PDF buffers
-	const pdfBytesArray = results
-		.filter((result): result is PromiseFulfilledResult<Buffer> =>
-			result.status === 'fulfilled' && result.value !== null
+
+	// Filter out failed results and extract PDF buffers with their URLs
+	const pdfResults = results
+		.filter((result): result is PromiseFulfilledResult<{ url: string, buffer: Buffer } | null> =>
+			result.status === 'fulfilled'
 		)
 		.map(result => result.value)
-		.filter((buffer): buffer is Buffer => buffer !== null);
+		.filter((result): result is { url: string, buffer: Buffer } => result !== null);
 
-	for (const pdfBytes of pdfBytesArray) {
-		const subPdfDoc = await PDFDocument.load(pdfBytes);
-		const copiedPages = await pdfDoc.copyPages(
-			subPdfDoc,
-			subPdfDoc.getPageIndices(),
-		);
-		for (const page of copiedPages) {
-			pdfDoc.addPage(page);
-		}
+	if (pdfResults.length === 0) {
+		throw new Error("No PDFs were generated successfully");
 	}
 
-	const pdfBytes = await pdfDoc.save();
-	const pdfBuffer = Buffer.from(pdfBytes);
+	// If separate option is not used, combine all PDFs
+	if (!options?.separate) {
+		const pdfDoc = await PDFDocument.create();
+		for (const { buffer } of pdfResults) {
+			const subPdfDoc = await PDFDocument.load(buffer);
+			const copiedPages = await pdfDoc.copyPages(
+				subPdfDoc,
+				subPdfDoc.getPageIndices(),
+			);
+			for (const page of copiedPages) {
+				pdfDoc.addPage(page);
+			}
+		}
+		const pdfBytes = await pdfDoc.save();
+		return Buffer.from(pdfBytes);
+	}
 
-	return pdfBuffer;
+	// Return array of results for separate PDFs
+	return pdfResults;
 }
 
 export function generateSlug(url: string): string {
@@ -214,13 +222,32 @@ export async function main(mainURL: string, urlPattern?: string | RegExp, option
 	let ctx;
 	try {
 		ctx = await useBrowserContext();
-		const pdfBuffer = await generatePDF(ctx, mainURL, pattern instanceof RegExp ? pattern : new RegExp(pattern), cpus().length);
-		const slug = generateSlug(mainURL);
-		const outputDir = join(options.outputPath);
-		const outputPath = join(outputDir, `${slug}.pdf`);
+		const result = await generatePDF(
+			ctx,
+			mainURL,
+			pattern instanceof RegExp ? pattern : new RegExp(pattern),
+			cpus().length,
+			{ separate: options.separate }
+		);
 
-		await fs.writeFile(outputPath, pdfBuffer);
-		console.log(`PDF saved to ${outputPath}`);
+		const outputDir = join(options.outputPath);
+		await fs.ensureDir(outputDir);
+
+		if (Array.isArray(result)) {
+			// Handle separate PDFs case
+			for (const { url, buffer } of result) {
+				const slug = generateSlug(url);
+				const outputPath = join(outputDir, `${slug}.pdf`);
+				await fs.writeFile(outputPath, buffer);
+				console.log(`PDF saved to ${outputPath}`);
+			}
+		} else {
+			// Handle single combined PDF case
+			const slug = generateSlug(mainURL);
+			const outputPath = join(outputDir, `${slug}.pdf`);
+			await fs.writeFile(outputPath, result);
+			console.log(`PDF saved to ${outputPath}`);
+		}
 	} catch (error) {
 		console.error("Error generating PDF:", error);
 	} finally {
