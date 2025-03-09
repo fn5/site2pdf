@@ -39,7 +39,7 @@ async function useBrowserContext() {
 export async function generatePDF(
 	ctx: BrowserContext,
 	url: string,
-	urlPattern: RegExp = new RegExp(`^${url}`),
+	urlPattern: RegExp,
 	concurrentLimit: number,
 ): Promise<Buffer> {
 	const limit = pLimit(concurrentLimit);
@@ -55,22 +55,22 @@ export async function generatePDF(
 		try {
 			await page.goto(currentUrl, { waitUntil: 'networkidle0', timeout: 30000 });
 			
-			const subLinks = await page.evaluate((mainUrl) => {
+			const subLinks = await page.evaluate((mainUrl, pattern) => {
 				const links = Array.from(document.querySelectorAll("a"));
 				return links.map(link => {
 					try {
 						const resolvedUrl = new URL(link.href, window.location.href).href;
-						return resolvedUrl.startsWith(mainUrl) &&
-							!resolvedUrl.includes("#") &&
+						return !resolvedUrl.includes("#") &&
 							!resolvedUrl.includes("mailto:") &&
-							!resolvedUrl.includes("tel:")
+							!resolvedUrl.includes("tel:") &&
+							new RegExp(pattern).test(resolvedUrl)
 							? resolvedUrl
 							: null;
 					} catch {
 						return null;
 					}
 				}).filter(Boolean) as string[];
-			}, url);
+			}, url, urlPattern.source);
 			
 			for (const link of subLinks) {
 				const normalized = normalizeURL(link);
@@ -198,12 +198,15 @@ interface Options {
   outputPath: string;
 }
 
-export async function main(mainURL: string, urlPattern: string | RegExp, options: Options = { outputPath: './out' }) {
+export async function main(mainURL: string, urlPattern?: string | RegExp, options: Options = { outputPath: './out' }) {
 
 	if (!mainURL) {
 		showHelp();
 		throw new Error("<main_url> is required");
 	}
+
+	// Ensure urlPattern has a default value if not provided
+	const pattern = urlPattern || new RegExp(`^${mainURL}`);
 
 	console.log(
 		`Generating PDF for ${mainURL} and sub-links matching ${urlPattern}`,
@@ -211,7 +214,7 @@ export async function main(mainURL: string, urlPattern: string | RegExp, options
 	let ctx;
 	try {
 		ctx = await useBrowserContext();
-		const pdfBuffer = await generatePDF(ctx, mainURL, urlPattern instanceof RegExp ? urlPattern : new RegExp(urlPattern), cpus().length);
+		const pdfBuffer = await generatePDF(ctx, mainURL, pattern instanceof RegExp ? pattern : new RegExp(pattern), cpus().length);
 		const slug = generateSlug(mainURL);
 		const outputDir = join(options.outputPath);
 		const outputPath = join(outputDir, `${slug}.pdf`);
