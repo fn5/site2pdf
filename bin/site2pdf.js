@@ -9,7 +9,8 @@ const argv = yargs(hideBin(process.argv))
     yargs
       .positional('url', {
         type: 'string',
-        description: 'Main URL to process'
+        description: 'Main URL to process',
+        demandOption: true
       })
       .positional('url-pattern', {
         type: 'string',
@@ -31,7 +32,7 @@ const argv = yargs(hideBin(process.argv))
   .alias('help', 'h')
   .parse();
 
-main(argv._[0], argv.urlPattern, {
+main(argv.url, argv['url-pattern'], {
   separate: argv.separate,
   outputPath: argv.output
 });
