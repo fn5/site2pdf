@@ -5,11 +5,17 @@ import { hideBin } from 'yargs/helpers';
 import { main } from '../dist/index.js';
 
 const argv = yargs(hideBin(process.argv))
-  .usage('Usage: $0 <url> [url-pattern] [options]')
-  .positional('urlPattern', {
-    type: 'string',
-    description: 'Regex pattern to match URLs for processing'
-  })
+  .command('$0 <url> [url-pattern]', 'Generate PDF from website', (yargs) =>
+    yargs
+      .positional('url', {
+        type: 'string',
+        description: 'Main URL to process'
+      })
+      .positional('url-pattern', {
+        type: 'string',
+        description: 'Regex pattern to match URLs for processing'
+      })
+  )
   .option('separate', {
     alias: 's',
     type: 'boolean',
