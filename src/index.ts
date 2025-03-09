@@ -1,7 +1,6 @@
 import { Buffer } from "node:buffer";
-import fs from 'fs-extra';
-import fs from 'fs-extra';
 import { join, resolve } from "node:path";
+import fs from 'fs-extra';
 import { fileURLToPath } from "node:url";
 import { cpus } from "node:os";
 
@@ -193,7 +192,6 @@ export function normalizeURL(url: string): string {
 		: urlWithoutAnchor;
 }
 
-import fs from 'fs-extra';
 
 interface Options {
   separate?: boolean;
