@@ -117,11 +117,18 @@ export async function generatePDF(
 				);
 			}, { timeout: 10000 });
 			
+			// Set viewport for high resolution rendering
+			await newPage.setViewport({
+				width: 2480,
+				height: 3508,
+				deviceScaleFactor: 2
+			});
+			
 			const pdfBytes = await newPage.pdf({
-				format: "A4",
+				format: "A3",
 				preferCSSPageSize: true,
-				omitBackground: true,
-				scale: 1.0,
+				omitBackground: false,
+				scale: 1.5,
 				printBackground: true,
 				timeout: 60000
 			});
