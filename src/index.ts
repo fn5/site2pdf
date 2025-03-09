@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
-import { writeFileSync, existsSync, mkdirSync } from "node:fs";
+import fs from 'fs-extra';
+import fs from 'fs-extra';
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cpus } from "node:os";
@@ -192,11 +193,14 @@ export function normalizeURL(url: string): string {
 		: urlWithoutAnchor;
 }
 
-export async function main() {
-	const mainURL = process.argv[2];
-	const urlPattern = process.argv[3]
-		? new RegExp(process.argv[3])
-		: new RegExp(`^${mainURL}`);
+import fs from 'fs-extra';
+
+interface Options {
+  separate?: boolean;
+  outputPath: string;
+}
+
+export async function main(mainURL: string, urlPattern: string | RegExp, options: Options) {
 
 	if (!mainURL) {
 		showHelp();
@@ -209,16 +213,12 @@ export async function main() {
 	let ctx;
 	try {
 		ctx = await useBrowserContext();
-		const pdfBuffer = await generatePDF(ctx, mainURL, urlPattern, cpus().length);
+		const pdfBuffer = await generatePDF(ctx, mainURL, urlPattern instanceof RegExp ? urlPattern : new RegExp(urlPattern), cpus().length);
 		const slug = generateSlug(mainURL);
-		const outputDir = join(process.cwd(), "out");
+		const outputDir = join(options.outputPath);
 		const outputPath = join(outputDir, `${slug}.pdf`);
 
-		if (!existsSync(outputDir)) {
-			mkdirSync(outputDir, { recursive: true });
-		}
-
-		writeFileSync(outputPath, new Uint8Array(pdfBuffer));
+		await fs.writeFile(outputPath, pdfBuffer);
 		console.log(`PDF saved to ${outputPath}`);
 	} catch (error) {
 		console.error("Error generating PDF:", error);
@@ -228,5 +228,6 @@ export async function main() {
 }
 
 if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+	// @ts-ignore - CLI args are handled in bin/site2pdf.js
 	main();
 }
