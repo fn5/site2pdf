@@ -43,17 +43,53 @@ export async function generatePDF(
 	concurrentLimit: number,
 ): Promise<Buffer> {
 	const limit = pLimit(concurrentLimit);
-	const page = await ctx.browser.newPage();
-	await page.goto(url, { waitUntil: 'domcontentloaded' });
+	const crawledUrls = new Set<string>();
+	const queue: string[] = [url];
+	
+	// Recursive crawl function
+	const crawlPage = async (currentUrl: string) => {
+		if (crawledUrls.has(currentUrl)) return;
+		crawledUrls.add(currentUrl);
+		
+		const page = await ctx.browser.newPage();
+		try {
+			await page.goto(currentUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+			
+			const subLinks = await page.evaluate((mainUrl) => {
+				const links = Array.from(document.querySelectorAll("a"));
+				return links.map(link => {
+					try {
+						const resolvedUrl = new URL(link.href, window.location.href).href;
+						return resolvedUrl.startsWith(mainUrl) &&
+							!resolvedUrl.includes("#") &&
+							!resolvedUrl.includes("mailto:") &&
+							!resolvedUrl.includes("tel:")
+							? resolvedUrl
+							: null;
+					} catch {
+						return null;
+					}
+				}).filter(Boolean) as string[];
+			}, url);
+			
+			for (const link of subLinks) {
+				const normalized = normalizeURL(link);
+				if (!crawledUrls.has(normalized) && !queue.includes(normalized)) {
+					queue.push(normalized);
+				}
+			}
+		} finally {
+			await page.close();
+		}
+	};
 
-	const subLinks = await page.evaluate((patternString) => {
-		const pattern = new RegExp(patternString);
-		const links = Array.from(document.querySelectorAll("a"));
-		return links.map((link) => link.href).filter((href) => pattern.test(href));
-	}, urlPattern.source);
+	// Process queue recursively
+	while (queue.length > 0) {
+		const currentUrl = queue.shift()!;
+		await crawlPage(currentUrl);
+	}
 
-	const subLinksWithoutAnchors = subLinks.map((link) => normalizeURL(link));
-	const uniqueSubLinks = Array.from(new Set(subLinksWithoutAnchors));
+	const uniqueSubLinks = Array.from(crawledUrls);
 
 	if (!uniqueSubLinks.includes(url)) {
 		uniqueSubLinks.unshift(url);
@@ -62,33 +98,57 @@ export async function generatePDF(
 	const pdfDoc = await PDFDocument.create();
 
 	const generatePDFForPage = async (link: string) => {
-		console.log(`loading ${link}`);
+		console.log(`Processing ${link}`);
 		const newPage = await ctx.browser.newPage();
-		let pdfBytes;
 		try {
-			await newPage.goto(link, { waitUntil: 'domcontentloaded' });
-			pdfBytes = await newPage.pdf({
+			// Wait for all network activity to stop for at least 500ms
+			await newPage.goto(link, {
+				waitUntil: 'networkidle0',
+				timeout: 30000
+			});
+			
+			// Wait for any lazy-loaded content
+			await newPage.waitForFunction(() => {
+				// Wait for any pending dynamic content
+				const initialHeight = document.body.scrollHeight;
+				setTimeout(() => window.scrollBy(0, 1000), 100);
+				return new Promise(resolve =>
+					setTimeout(() => resolve(document.body.scrollHeight === initialHeight), 500)
+				);
+			}, { timeout: 10000 });
+			
+			const pdfBytes = await newPage.pdf({
 				format: "A4",
 				preferCSSPageSize: true,
 				omitBackground: true,
-				scale: 1.0
+				scale: 1.0,
+				printBackground: true,
+				timeout: 60000
 			});
-			console.log(`Generated PDF for ${link}`);
-			return Buffer.from(pdfBytes);
+			
+			console.log(`Successfully generated PDF for ${link}`);
+			return pdfBytes;
 		} catch (error) {
-			console.warn(`Warning: Error occurred while processing ${link}: ${error}`);
+			console.warn(`Skipping ${link}: ${error instanceof Error ? error.message : error}`);
 			return null;
 		} finally {
 			await newPage.close();
 		}
 	};
 
-	const pdfPromises = uniqueSubLinks.map((link) =>
-		limit(() => generatePDFForPage(link)),
+	// Process all crawled pages with concurrency control
+	const results = await Promise.allSettled(
+		uniqueSubLinks.map(link =>
+			limit(() => generatePDFForPage(link))
+		)
 	);
-	const pdfBytesArray = (await Promise.all(pdfPromises)).filter(
-		(buffer): buffer is Buffer => buffer !== null
-	);
+	// Filter out failed results and extract PDF buffers
+	const pdfBytesArray = results
+		.filter((result): result is PromiseFulfilledResult<Buffer> =>
+			result.status === 'fulfilled' && result.value !== null
+		)
+		.map(result => result.value)
+		.filter((buffer): buffer is Buffer => buffer !== null);
 
 	for (const pdfBytes of pdfBytesArray) {
 		const subPdfDoc = await PDFDocument.load(pdfBytes);
