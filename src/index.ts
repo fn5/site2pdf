@@ -67,7 +67,12 @@ export async function generatePDF(
 		let pdfBytes;
 		try {
 			await newPage.goto(link, { waitUntil: 'domcontentloaded' });
-			pdfBytes = await newPage.pdf({ format: "A4" });
+			pdfBytes = await newPage.pdf({
+				format: "A4",
+				preferCSSPageSize: true,
+				omitBackground: true,
+				scale: 1.0
+			});
 			console.log(`Generated PDF for ${link}`);
 			return Buffer.from(pdfBytes);
 		} catch (error) {
