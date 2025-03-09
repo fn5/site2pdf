@@ -198,7 +198,7 @@ interface Options {
   outputPath: string;
 }
 
-export async function main(mainURL: string, urlPattern: string | RegExp, options: Options) {
+export async function main(mainURL: string, urlPattern: string | RegExp, options: Options = { outputPath: './out' }) {
 
 	if (!mainURL) {
 		showHelp();

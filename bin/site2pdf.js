@@ -15,7 +15,7 @@ const argv = yargs(hideBin(process.argv))
     alias: 'o',
     type: 'string',
     description: 'Output path for PDF file(s)',
-    default: './output'
+    default: './out'
   })
   .help()
   .alias('help', 'h')
