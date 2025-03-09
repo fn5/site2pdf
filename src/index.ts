@@ -116,18 +116,42 @@ export async function generatePDF(
 				);
 			}, { timeout: 10000 });
 			
-			// Set viewport for high resolution rendering
+			// Set viewport for maximum resolution rendering
 			await newPage.setViewport({
 				width: 2480,
 				height: 3508,
-				deviceScaleFactor: 2
+				deviceScaleFactor: 4
+			});
+
+			// Wait for all images to load completely
+			await newPage.evaluate(() => {
+				return Promise.all(
+					Array.from(document.images)
+						.filter(img => !img.complete)
+						.map(img => new Promise(resolve => {
+							img.onload = img.onerror = resolve;
+						}))
+				);
+			});
+
+			// Ensure high-quality image rendering
+			await newPage.evaluate(() => {
+				const style = document.createElement('style');
+				style.textContent = `
+					img {
+						image-rendering: -webkit-optimize-contrast;
+						image-rendering: crisp-edges;
+						-ms-interpolation-mode: nearest-neighbor;
+					}
+				`;
+				document.head.appendChild(style);
 			});
 			
 			const pdfBytes = await newPage.pdf({
 				format: "A3",
 				preferCSSPageSize: true,
 				omitBackground: false,
-				scale: 1.5,
+				scale: 1,
 				printBackground: true,
 				timeout: 60000
 			});
